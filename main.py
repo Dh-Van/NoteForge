@@ -40,6 +40,7 @@ def seperate_audio(fpath, fname):
     out_path = get_music(fpath, fname)
     print(out_path)
     bss.separate(out_path)
+    return True
 
 def convert_to_notes(fpath):
     pass
@@ -49,22 +50,31 @@ def gen_sheet_music(fpath, fname):
 
 def cli():
     # Input phrases
-    option_phrase = f'Select an input (1-3): \n1: Seperate Audio\n2: Convert to Notes\n3: Generate Sheet Music\n'
+    option_phrase = f'Select an input (1-3): \n1: Seperate Audio\n2: Convert to Notes\n3: Generate Sheet Music\nx: Exit Program\n'
     file_phrase = f'Enter file path to .wav file:\n'
     seperated_phrase = f'Enter path to seperated audio files folder:\n'
     option = input(option_phrase)
     if(option == "1"):
         file_input = input(file_phrase)
         fpath, fname = os.path.split(file_input)
-        seperate_audio(fpath, fname)
+        success = seperate_audio(fpath, fname)
+        if(success):
+            print("Audio seperated, exiting program")
+            cli()
+        else:
+            print("Seperation error, exiting program")
+            cli()
     elif(option == "2"):
         seperated_input = input(seperated_phrase)
         convert_to_notes(seperated_input)
         pass
     elif(option == "3"):
         pass
+    elif(option == "X" or option == "x"):
+        return
     else:
         cli()
 
-seperate_audio("./input", "SwampThang.wav")
+# seperate_audio("./input", "SwampThang.wav")
+cli()
 
