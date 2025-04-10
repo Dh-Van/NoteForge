@@ -50,6 +50,23 @@ def separate(fpath):
 
     magnitude_spectrogram = np.abs(stft_matrix)
 
+    # Create a mask that selects only time up to 10 seconds
+    time_mask = time_segments <= 10.0
+
+    # Subset the time axis and the spectrogram data
+    time_segments_10 = time_segments[time_mask]
+    magnitude_spectrogram_10 = magnitude_spectrogram[:, time_mask]
+
+    # Plot only the first 10 seconds
+    plt.figure()
+    plt.pcolormesh(time_segments_10, frequencies, magnitude_spectrogram_10, shading='gouraud')
+    plt.title("Spectrogram - First 10 Seconds")
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Frequency (Hz)")
+    plt.colorbar(label="Magnitude")
+    plt.show()
+
+'''
     plt.figure()
     plt.pcolormesh(time_segments, frequencies, magnitude_spectrogram, shading='gouraud')
     plt.title("Input File Spectrogram")
@@ -57,6 +74,6 @@ def separate(fpath):
     plt.ylabel("Frequency (Hz)")
     plt.colorbar(label="Magnitude")
     plt.show()
-
+'''
 
 
