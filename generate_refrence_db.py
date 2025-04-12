@@ -33,7 +33,7 @@ def get_all_instruments():
         get_single_instrument_sample(instrument, url)
 
 def get_single_instrument_sample(instrument, url):
-    os.makedirs(f'instrument_samples/{instrument}', exist_ok=True)
+    os.makedirs(f'instrument_samples/{instrument[:-2]}/{instrument}', exist_ok=True)
     response = requests.get(url)
 
     if(response.status_code != 200):
@@ -49,8 +49,7 @@ def get_single_instrument_sample(instrument, url):
             audio = AudioSegment.from_file(aiff_data, format="aiff")
             name_arr = name.split(".")
             fname = f'{name_arr[0]}.{name_arr[3]}.{name_arr[4]}'
-            audio.export(f'instrument_samples/{instrument}/{fname}.wav', format="wav")
-
+            audio.export(f'instrument_samples/{instrument[:-2]}/{instrument}/{fname}.wav', format="wav")
 
 def compute_envelope(signal, chunk_size=256, threshold=1e-2):
     envelope = []
@@ -81,30 +80,43 @@ def retrive_asr(envelope):
 
     return env[:attack_end_index], env[attack_end_index:release_start_index], env[release_start_index:]
 
-waveform, sampling_rate = sf.read("./instrument_samples/Viola_A/Viola.sulA.A4.wav")
-a, s, r = retrive_asr(compute_envelope(waveform))
+# def save_all_asr():
 
-plt.figure()
-plt.subplot(4, 1, 1)
-plt.plot(np.concatenate([a, s, r]))
-plt.subplot(4, 1, 2)
-plt.plot(a)
-plt.subplot(4, 1, 3)
-plt.plot(s)
-plt.subplot(4, 1, 4)
-plt.plot(r)
 
-waveform, sampling_rate = sf.read("./instrument_samples/Bass_C/Bass.sulC.C1.wav")
-a, s, r = retrive_asr(compute_envelope(waveform))
+def save_single_asr(instrument, sul, note, waveform):
+    envelope = compute_envelope(waveform)
+    attack, sustain, release = retrive_asr(envelope)
 
-plt.figure()
-plt.subplot(4, 1, 1)
-plt.plot(np.concatenate([a, s, r]))
-plt.subplot(4, 1, 2)
-plt.plot(a)
-plt.subplot(4, 1, 3)
-plt.plot(s)
-plt.subplot(4, 1, 4)
-plt.plot(r)
-plt.show()
+    key = (instrument.lower(), note.upper())
+    
+    if key not in refrence_db:
+        refrence_db[key] = {}
+
+    refrence_db[key][sul] = {
+        "waveform": waveform,
+        "sampling_rate": 1,
+        "envelope": envelope,
+        "attack": attack,
+        "sustain": sustain,
+        "release": release
+    }
+
+
+
+refrence_db = {}
+
+get_all_instruments()
+
+# waveform, sampling_rate = sf.read("./instrument_samples/Viola_A/Viola.sulA.A4.wav")
+# a, s, r = retrive_asr(compute_envelope(waveform))
+
+# plt.figure()
+# plt.subplot(4, 1, 1)
+# plt.plot(np.concatenate([a, s, r]))
+# plt.subplot(4, 1, 2)
+# plt.plot(a)
+# plt.subplot(4, 1, 3)
+# plt.plot(s)
+# plt.subplot(4, 1, 4)
+# plt.plot(r)
     
