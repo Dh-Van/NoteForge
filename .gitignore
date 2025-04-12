@@ -5,7 +5,7 @@ __pycache__/
 
 input/
 output/
-
+instrument_samples/
 # C extensions
 *.so
 
