@@ -77,3 +77,4 @@ def separate(fpath):
 '''
 
 
+print("fire truck")
