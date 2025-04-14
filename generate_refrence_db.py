@@ -51,13 +51,15 @@ def get_single_instrument_sample(instrument, url):
             fname = f'{name_arr[0]}.{name_arr[3]}.{name_arr[4]}'
             audio.export(f'instrument_samples/{instrument[:-2]}/{instrument}/{fname}.wav', format="wav")
 
-def compute_envelope(signal, chunk_size=256, threshold=1e-2):
+def compute_envelope(signal, threshold=1e-2):
     envelope = []
+    chunk_size = int(len(signal) / 50)
     for i in range(0, len(signal), chunk_size):
         chunk = signal[i : i + chunk_size]
         envelope.append(np.max(chunk))
     zero_idx = np.where(np.array(envelope) > threshold)[0]
     return gaussian_filter1d(envelope[zero_idx[0] : zero_idx[-1] + 1], 2)
+
 
 def retrive_asr(envelope):
     env = envelope / (np.max(envelope))
@@ -73,8 +75,8 @@ def retrive_asr(envelope):
             attack_end_index = i
             break
 
-    for i in range(env_length - 2, 0, -1):
-        if(slope[i] > slope[i + 1] or curvature[i] > 0):
+    for i in range(attack_end_index + 5, env_length):
+        if(slope[i] > slope[i + 1] and curvature[i] < 0):
             release_start_index = i
             break
 
@@ -105,18 +107,18 @@ def save_single_asr(instrument, sul, note, waveform):
 
 refrence_db = {}
 
-get_all_instruments()
+# get_all_instruments()
 
-# waveform, sampling_rate = sf.read("./instrument_samples/Viola_A/Viola.sulA.A4.wav")
-# a, s, r = retrive_asr(compute_envelope(waveform))
+waveform, sampling_rate = sf.read("./instrument_samples/Viola/Viola_A/Viola.sulA.A4.wav")
+a, s, r = retrive_asr(compute_envelope(waveform))
 
-# plt.figure()
-# plt.subplot(4, 1, 1)
-# plt.plot(np.concatenate([a, s, r]))
-# plt.subplot(4, 1, 2)
-# plt.plot(a)
-# plt.subplot(4, 1, 3)
-# plt.plot(s)
-# plt.subplot(4, 1, 4)
-# plt.plot(r)
-    
+plt.figure()
+plt.subplot(4, 1, 1)
+plt.plot(np.concatenate([a, s, r]))
+plt.subplot(4, 1, 2)
+plt.plot(a)
+plt.subplot(4, 1, 3)
+plt.plot(s)
+plt.subplot(4, 1, 4)
+plt.plot(r)
+plt.show()
