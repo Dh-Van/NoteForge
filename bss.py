@@ -3,78 +3,53 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import stft
 import os
+from utils import note_to_freq
 
 
-def separate(fpath):
-    with wave.open(fpath, "rb") as w:
-    # Extract parameters of .wav file
-        n_channels = w.getnchannels()
-        samp_width = w.getsampwidth()   
-        framerate = w.getframerate()
-        n_frames = w.getnframes()
-    
-        raw_data = w.readframes(n_frames)
+def separate_audio(fpath, window_size=1024, overlap=None):
+    # Load audio and force mono
+    with wave.open(fpath, 'rb') as w:
+        fs = w.getframerate()
+        raw = w.readframes(w.getnframes())
+        dtype = {1: np.int8, 2: np.int16, 4: np.int32}[w.getsampwidth()]
+        audio = np.frombuffer(raw, dtype=dtype).astype(np.float32)
+        if audio.ndim > 1:
+            audio = audio.reshape(-1, w.getnchannels())[:, 0]
 
-    # Convert raw data to numpy array
-    if samp_width == 1:
-        dtype = np.int8
-    elif samp_width == 2:
-        dtype = np.int16
-    elif samp_width == 3:
-        dtype = np.int32
-    elif samp_width == 4:
-        dtype = np.int32
-    else:
-        raise ValueError("Unsupported sample width: {}".format(samp_width))
-    
-    audio_data = np.frombuffer(raw_data, dtype=dtype)
-    audio_data = audio_data.astype(np.float32)
+    # Compute STFT
+    if overlap is None:
+        overlap = window_size // 2
+    freqs, times, Zxx = stft(audio, fs=fs, nperseg=window_size, noverlap=overlap)
+    S = np.abs(Zxx)
 
-    # Taking STFT
+    # Define notes from A1 through G6 (flats only)
+    notes = []
+    # Octave 1: A1, Bb1, B1
+    for tone in ["A", "Bb", "B"]:
+        notes.append(f"{tone}1")
+    # Octaves 2-5: full chromatic scale in flats
+    for octave in range(2, 6):
+        for tone in ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"]:
+            notes.append(f"{tone}{octave}")
+    # Octave 6: C6 through G6
+    for tone in ["C", "Db", "D", "Eb", "E", "F", "Gb", "G"]:
+        notes.append(f"{tone}6")
 
-    window_size = 1024
-    overlap = 512
+    n_frames = S.shape[1]
+    n_notes = len(notes)
+    mag_matrix = np.zeros((n_frames, n_notes), dtype=np.float32)
 
-    frequencies, time_segments, stft_matrix = stft(
-        audio_data,
-        fs=framerate,
-        window='hann',
-        nperseg=window_size,
-        noverlap=overlap,
-        nfft=window_size,
-        return_onesided=True
-    )
-
-    
-    print(frequencies, time_segments, stft_matrix)
-
-    magnitude_spectrogram = np.abs(stft_matrix)
-
-    # Create a mask that selects only time up to 10 seconds
-    time_mask = time_segments <= 10.0
-
-    # Subset the time axis and the spectrogram data
-    time_segments_10 = time_segments[time_mask]
-    magnitude_spectrogram_10 = magnitude_spectrogram[:, time_mask]
-
-    # Plot only the first 10 seconds
-    plt.figure()
-    plt.pcolormesh(time_segments_10, frequencies, magnitude_spectrogram_10, shading='gouraud')
-    plt.title("Spectrogram - First 10 Seconds")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Frequency (Hz)")
-    plt.colorbar(label="Magnitude")
-    plt.show()
-
-'''
-    plt.figure()
-    plt.pcolormesh(time_segments, frequencies, magnitude_spectrogram, shading='gouraud')
-    plt.title("Input File Spectrogram")
-    plt.xlabel("Time (seconds)")
-    plt.ylabel("Frequency (Hz)")
-    plt.colorbar(label="Magnitude")
-    plt.show()
-'''
-
-
-print("fire truck")
+    # Sum magnitudes around each note's frequency
+    for j, nm in enumerate(notes):
+        tone = nm[:-1]
+        octave = nm[-1]
+        f0 = note_to_freq(tone, octave)
+        # half-semitone band
+        f_low  = f0 * 2 ** (-1/24)
+        f_high = f0 * 2 ** ( 1/24)
+        idx = np.where((freqs >= f_low) & (freqs <= f_high))[0]
+        if idx.size:
+            mag_matrix[:, j] = np.sum(S[idx, :], axis=0)
+    print(f"Extracted {n_notes} notes from {fpath}")
+    print(mag_matrix)
+    return mag_matrix, times, notes
