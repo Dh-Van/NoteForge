@@ -16,5 +16,5 @@ def note_to_freq(note, octave):
 
     midi_number = 12 * (int(octave) + 1) + tone_dict[note]
 
-    freq = 440.0 * 2 ** ((midi_number - 69) / 2)
+    freq = 440.0 * 2 ** ((midi_number - 69)) / 2
     return freq
