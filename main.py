@@ -36,7 +36,7 @@ def get_music(fpath, fname):
 
     return f'./output/{fname[:-4]}/{fname[:-4]}_mono.wav'
 
-def seperate_audio(fpath, fname):
+def separate_audio(fpath, fname):
     out_path = get_music(fpath, fname)
     print(out_path)
     bss.separate(out_path)
@@ -50,23 +50,23 @@ def gen_sheet_music(fpath, fname):
 
 def cli():
     # Input phrases
-    option_phrase = f'Select an input (1-3): \n1: Seperate Audio\n2: Convert to Notes\n3: Generate Sheet Music\nx: Exit Program\n'
+    option_phrase = f'Select an input (1-3): \n1: Separate Audio\n2: Convert to Notes\n3: Generate Sheet Music\nx: Exit Program\n'
     file_phrase = f'Enter file path to .wav file:\n'
-    seperated_phrase = f'Enter path to seperated audio files folder:\n'
+    separated_phrase = f'Enter path to saperated audio files folder:\n'
     option = input(option_phrase)
     if(option == "1"):
         file_input = input(file_phrase)
         fpath, fname = os.path.split(file_input)
-        success = seperate_audio(fpath, fname)
+        success = separate_audio(fpath, fname)
         if(success):
-            print("Audio seperated, exiting program")
+            print("Audio separated, exiting program")
             cli()
         else:
-            print("Seperation error, exiting program")
+            print("Separation error, exiting program")
             cli()
     elif(option == "2"):
-        seperated_input = input(seperated_phrase)
-        convert_to_notes(seperated_input)
+        separated_input = input(separated_phrase)
+        convert_to_notes(separated_input)
         pass
     elif(option == "3"):
         pass
