@@ -6,7 +6,10 @@ import os
 import soundfile as sf
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.signal as sg
 from scipy.ndimage import gaussian_filter1d
+import utils
+import regex as re
 
 def get_all_instruments():
     data = [
@@ -51,74 +54,56 @@ def get_single_instrument_sample(instrument, url):
             fname = f'{name_arr[0]}.{name_arr[3]}.{name_arr[4]}'
             audio.export(f'instrument_samples/{instrument[:-2]}/{instrument}/{fname}.wav', format="wav")
 
-def compute_envelope(signal, threshold=1e-2):
-    envelope = []
-    chunk_size = int(len(signal) / 50)
-    for i in range(0, len(signal), chunk_size):
-        chunk = signal[i : i + chunk_size]
-        envelope.append(np.max(chunk))
-    zero_idx = np.where(np.array(envelope) > threshold)[0]
-    return gaussian_filter1d(envelope[zero_idx[0] : zero_idx[-1] + 1], 2)
+def compute_envelope(signal, sampling_rate, freq=440, chunk_size=20):
+    # Bandpass Filter around the note's freq
+    cutoff = (freq / np.sqrt(2), freq * np.sqrt(2))
+    sos = sg.butter(5, cutoff, btype="bandpass", fs=sampling_rate, output='sos')
+    filtered = sg.sosfilt(sos, signal)
 
+    magnitude = np.abs(filtered)
+    envelope = []
+    for i in range(0, len(filtered), chunk_size):
+        chunk = filtered[i : i + chunk_size]
+        envelope.append(chunk)
+
+    # # Step 4: Smooth envelope with Gaussian filter
+    # smoothed = gaussian_filter1d(trimmed, sigma=5)
+
+    return envelope
 
 def retrive_asr(envelope):
-    env = envelope / (np.max(envelope))
-    env_length = len(env)
-    slope = np.gradient(env)
-    curvature = np.gradient(slope)
+    pass
 
-    attack_end_index = 0.2 * env_length
-    release_start_index = 0.8 * env_length
+def save_single_asr(instrument, sul, note, waveform, sampling_rate):
+    split_note = re.match(r'^([A-G])(\d+)$', note, re.IGNORECASE)
+    note_letter, octave = split_note.groups()
 
-    for i in range(1, env_length):
-        if(slope[i] < slope[i - 1] and curvature[i] < 0):
-            attack_end_index = i
-            break
+    freq = utils.note_to_freq(note_letter, octave)
 
-    for i in range(attack_end_index + 5, env_length):
-        if(slope[i] > slope[i + 1] and curvature[i] < 0):
-            release_start_index = i
-            break
+    envelope = compute_envelope(waveform, sampling_rate, freq)
 
-    return env[:attack_end_index], env[attack_end_index:release_start_index], env[release_start_index:]
+    # attack, sustain, release = retrive_asr(envelope)
 
-# def save_all_asr():
+    plt.figure()
+    plt.plot(envelope)
+    plt.show()
 
+    # key = (instrument.lower(), note.upper())
+    # if key not in refrence_db:
+    #     refrence_db[key] = {}
 
-def save_single_asr(instrument, sul, note, waveform):
-    envelope = compute_envelope(waveform)
-    attack, sustain, release = retrive_asr(envelope)
-
-    key = (instrument.lower(), note.upper())
-    
-    if key not in refrence_db:
-        refrence_db[key] = {}
-
-    refrence_db[key][sul] = {
-        "waveform": waveform,
-        "sampling_rate": 1,
-        "envelope": envelope,
-        "attack": attack,
-        "sustain": sustain,
-        "release": release
-    }
-
+    # refrence_db[key][sul] = {
+    #     "waveform": waveform,
+    #     "sampling_rate": sampling_rate,
+    #     "envelope": envelope,
+    #     "attack": attack,
+    #     "sustain": sustain,
+    #     "release": release
+    # }
 
 
 refrence_db = {}
 
-# get_all_instruments()
-
 waveform, sampling_rate = sf.read("./instrument_samples/Viola/Viola_A/Viola.sulA.A4.wav")
-a, s, r = retrive_asr(compute_envelope(waveform))
 
-plt.figure()
-plt.subplot(4, 1, 1)
-plt.plot(np.concatenate([a, s, r]))
-plt.subplot(4, 1, 2)
-plt.plot(a)
-plt.subplot(4, 1, 3)
-plt.plot(s)
-plt.subplot(4, 1, 4)
-plt.plot(r)
-plt.show()
+save_single_asr("Viola", "A", "A4", waveform, sampling_rate)
