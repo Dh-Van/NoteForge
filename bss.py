@@ -6,7 +6,7 @@ import os
 from utils import note_to_freq
 
 
-def separate_audio(fpath, window_size=1024, overlap=None):
+def separate(fpath, window_size=1024, overlap=None):
     # Load audio and force mono
     with wave.open(fpath, 'rb') as w:
         fs = w.getframerate()
@@ -39,6 +39,8 @@ def separate_audio(fpath, window_size=1024, overlap=None):
     n_notes = len(notes)
     mag_matrix = np.zeros((n_frames, n_notes), dtype=np.float32)
 
+    print(notes)
+
     # Sum magnitudes around each note's frequency
     for j, nm in enumerate(notes):
         tone = nm[:-1]
@@ -50,6 +52,15 @@ def separate_audio(fpath, window_size=1024, overlap=None):
         idx = np.where((freqs >= f_low) & (freqs <= f_high))[0]
         if idx.size:
             mag_matrix[:, j] = np.sum(S[idx, :], axis=0)
-    print(f"Extracted {n_notes} notes from {fpath}")
-    print(mag_matrix)
-    return mag_matrix, times, notes
+    np.savetxt('mag_matrix.csv', mag_matrix, delimiter=',')
+    # Plot the magnitude matrix
+    plt.figure(figsize=(10, 6))
+    plt.imshow(mag_matrix.T, aspect='auto', origin='lower', cmap='viridis', extent=[times[0], times[-1], 0, len(notes)])
+    plt.colorbar(label='Magnitude')
+    plt.yticks(ticks=np.arange(len(notes)), labels=notes)
+    plt.xlabel('Time (s)')
+    plt.ylabel('Notes')
+    plt.title('Magnitude Matrix')
+    plt.tight_layout()
+    plt.show()
+    return mag_matrix
