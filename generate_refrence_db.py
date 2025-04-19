@@ -7,9 +7,9 @@ import soundfile as sf
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.signal as sg
-from scipy.ndimage import gaussian_filter1d
 import utils
 import regex as re
+import pickle
 
 def get_all_instruments():
     data = [
@@ -75,167 +75,269 @@ def hl_envelopes_idx(s, dmin=1, dmax=1, split=False):
     return lmin, lmax
 
 
-def compute_envelope(data, samplerate, freq_or_cutoff,
-                     n_chunks=200, pad_chunks=10, max_iter=200):
+# def compute_envelope(data, samplerate, freq_or_cutoff,
+#                      n_chunks=500, pad_chunks=1, max_iter=200):
+#     """
+#     Compute amplitude envelope and ASR boundaries efficiently by working
+#     at chunk resolution before upsampling to samples.
+
+#     Parameters:
+#         data           : 1D numpy array of audio samples
+#         samplerate     : sample rate in Hz
+#         freq_or_cutoff : float (freq in Hz), or [semitone], or (low,high) tuple
+#         n_chunks       : number of envelope chunks (default 200)
+#         pad_chunks     : padding size in chunks (default 10)
+#         max_iter       : max iterations for envelope fitting (default 200)
+
+#     Returns:
+#         [
+#           indices: np.array([A, B, C, D]) in sample indices,
+#           types  : ["AS"/"ASR", "Static"/"Dynamic"],
+#           env_curve: 1D numpy array of envelope at sample rate
+#         ]
+#     """
+#     # 1) Determine cutoff bandwidth
+#     if isinstance(freq_or_cutoff, (int, float)):
+#         low = freq_or_cutoff / np.sqrt(2)
+#         high = freq_or_cutoff * np.sqrt(2)
+#     elif isinstance(freq_or_cutoff, (list, tuple)) and len(freq_or_cutoff) == 1:
+#         base = freq_or_cutoff[0]
+#         low = 2 ** ((base - 1) / 12) * 27.5
+#         high = 2 ** ((base + 1) / 12) * 27.5
+#     else:
+#         low, high = freq_or_cutoff
+
+#     # 2) Bandpass filter and rectify
+#     sos = sg.butter(5, (low, high), fs=samplerate,
+#                     btype='bandpass', output='sos')
+#     filtered = sg.sosfilt(sos, data)
+#     rect = np.abs(filtered)
+
+#     # 3) Downsample to chunks via max per chunk
+#     chunk_size = int(np.ceil(len(rect) / n_chunks))
+#     rect_chunks = np.array([
+#         rect[i * chunk_size : (i + 1) * chunk_size].max()
+#         for i in range(n_chunks)
+#     ])
+
+#     # 4) Pad chunk array for envelope seeding
+#     padded = np.pad(rect_chunks, pad_chunks, constant_values=0.0)
+#     M = len(padded)
+#     x = np.arange(M)
+
+#     # 5) Seed envelope points at local extrema + endpoints
+#     _, seeds = hl_envelopes_idx(padded, dmin=1, dmax=1)
+#     # threshold endpoints
+#     A_c, D_c = np.where(padded > 0.01 * padded.max())[0][[0, -1]]
+#     seeds = np.sort(np.unique(np.concatenate([seeds, [A_c, D_c]])))
+
+#     # 6) Iterative upper-envelope fit on chunk-level data
+#     prev_len = -1
+#     for _ in range(max_iter):
+#         if len(seeds) == prev_len:
+#             break
+#         prev_len = len(seeds)
+#         interp = np.interp(x, seeds, padded[seeds])
+#         diff = padded - interp
+#         idx = np.argmax(diff)
+#         if padded[idx] <= interp[idx]:
+#             break
+#         seeds = np.sort(np.append(seeds, idx))
+#     absinterp = interp
+
+#     # 7) Compute derivatives on absinterp
+#     fp = np.diff(absinterp)
+#     fp_sm = np.convolve(fp, np.ones(dilation[0]), mode='same')
+#     fpp = np.diff(fp_sm)
+#     absfpp = np.convolve(np.abs(fpp), np.ones(dilation[1]), mode='same')
+#     fpp_sm = np.convolve(fpp, np.ones(dilation[1]), mode='same')
+
+#     # 8) Locate chunk-level A, B, C, D
+#     # A_c, D_c already have chunk indices
+#     # Find attack end B_c
+#     tmp = fpp_sm[A_c : D_c + 1].copy(); tmp[tmp >= 0] = 0
+#     peaks = np.where(-tmp > (np.max(-tmp) / 20))[0]
+#     pk0 = peaks[0] if len(peaks) else 0
+#     B_c = A_c + pk0
+#     # Find sustain end C_c
+#     tmp2 = fpp_sm[A_c : D_c + 1].copy(); tmp2[tmp2 >= 0] = 0
+#     peaks2 = np.where(-tmp2 > 0)[0]
+#     C_c = A_c + (peaks2[-1] if len(peaks2) else D_c - A_c)
+
+#     # 9) Classify AS vs ASR and Static vs Dynamic
+#     types = [None, None]
+#     if C_c <= B_c:
+#         types[0] = 'AS'
+#     else:
+#         types[0] = 'ASR'
+#     # dynamic test
+#     sustain = absinterp[B_c : C_c + 1]
+#     if sustain.size:
+#         change = (sustain[-1] - sustain[0])
+#         types[1] = 'Dynamic' if change < 0 else 'Static'
+#     else:
+#         types[1] = 'Static'
+
+#     # 10) Map chunk indices back to sample indices
+#     A = max((A_c - pad_chunks) * chunk_size, 0)
+#     B = max((B_c - pad_chunks) * chunk_size, 0)
+#     C = max((C_c - pad_chunks) * chunk_size, 0)
+#     D = min((D_c - pad_chunks) * chunk_size, len(data) - 1)
+#     indices = np.array([A, B, C, D])
+
+#         # 11) Upsample envelope to sample rate with linear interpolation
+#     env_chunks = absinterp[pad_chunks : M - pad_chunks]
+#     # Map chunk indices to sample positions
+#     chunk_positions = np.linspace(0, len(data) - 1, num=env_chunks.size)
+#     # Linearly interpolate envelope for each sample
+#     env_curve = np.interp(np.arange(len(data)), chunk_positions, env_chunks)
+
+#     return [indices, types, env_curve]
+
+def compute_envelope(data, samplerate, cutoff,
+                     n_chunks=500, pad_chunks=1, max_iter=200):
     """
-    Compute amplitude envelope and ASR boundaries efficiently by working
-    at chunk resolution before upsampling to samples.
+    Compute the amplitude envelope and ASR boundaries.
 
     Parameters:
-        data           : 1D numpy array of audio samples
-        samplerate     : sample rate in Hz
-        freq_or_cutoff : float (freq in Hz), or [semitone], or (low,high) tuple
-        n_chunks       : number of envelope chunks (default 200)
-        pad_chunks     : padding size in chunks (default 10)
-        max_iter       : max iterations for envelope fitting (default 200)
+        data        : 1D numpy array of audio samples
+        samplerate  : sample rate in Hz
+        cutoff      : (low, high) tuple in Hz for bandpass
+        n_chunks    : target number of envelope chunks
+        pad_chunks  : padding size (in chunks) for seeding
+        max_iter    : max iterations for upper‐envelope fitting
 
     Returns:
-        [
-          indices: np.array([A, B, C, D]) in sample indices,
-          types  : ["AS"/"ASR", "Static"/"Dynamic"],
-          env_curve: 1D numpy array of envelope at sample rate
-        ]
+        indices  : np.array([A, B, C, D])  # sample indices for ASR
+        types    : [“AS”/“ASR”, “Static”/“Dynamic”]
+        env_curve: 1D numpy array of full‑length envelope
     """
-    # 1) Determine cutoff bandwidth
-    if isinstance(freq_or_cutoff, (int, float)):
-        low = freq_or_cutoff / np.sqrt(2)
-        high = freq_or_cutoff * np.sqrt(2)
-    elif isinstance(freq_or_cutoff, (list, tuple)) and len(freq_or_cutoff) == 1:
-        base = freq_or_cutoff[0]
-        low = 2 ** ((base - 1) / 12) * 27.5
-        high = 2 ** ((base + 1) / 12) * 27.5
-    else:
-        low, high = freq_or_cutoff
+    low, high = cutoff
 
-    # 2) Bandpass filter and rectify
-    sos = sg.butter(5, (low, high), fs=samplerate,
-                    btype='bandpass', output='sos')
+    # 1) Bandpass filter & rectify
+    sos      = sg.butter(5, (low, high), fs=samplerate,
+                         btype='bandpass', output='sos')
     filtered = sg.sosfilt(sos, data)
-    rect = np.abs(filtered)
+    rect     = np.abs(filtered)
 
-    # 3) Downsample to chunks via max per chunk
+    # 2) Chunk‐wise max downsampling (avoid empty slices)
     chunk_size = int(np.ceil(len(rect) / n_chunks))
+    n_actual   = int(np.ceil(len(rect) / chunk_size))
     rect_chunks = np.array([
-        rect[i * chunk_size : (i + 1) * chunk_size].max()
-        for i in range(n_chunks)
+        rect[i*chunk_size : min((i+1)*chunk_size, len(rect))].max()
+        for i in range(n_actual)
     ])
 
-    # 4) Pad chunk array for envelope seeding
+    # 3) Pad for envelope seeding
     padded = np.pad(rect_chunks, pad_chunks, constant_values=0.0)
-    M = len(padded)
-    x = np.arange(M)
+    M      = len(padded)
+    x      = np.arange(M)
 
-    # 5) Seed envelope points at local extrema + endpoints
-    _, seeds = hl_envelopes_idx(padded, dmin=1, dmax=1)
-    # threshold endpoints
-    A_c, D_c = np.where(padded > 0.01 * padded.max())[0][[0, -1]]
-    seeds = np.sort(np.unique(np.concatenate([seeds, [A_c, D_c]])))
+    # 4) Seed points: local extrema + first/last above threshold
+    _, extrema = hl_envelopes_idx(padded, dmin=1, dmax=1)
+    A_c, D_c   = np.where(padded > 0.01 * padded.max())[0][[0, -1]]
+    seeds      = np.sort(np.unique(np.concatenate([extrema, [A_c, D_c]])))
 
-    # 6) Iterative upper-envelope fit on chunk-level data
+    # 5) Iteratively fit upper envelope on chunk‐level data
     prev_len = -1
     for _ in range(max_iter):
         if len(seeds) == prev_len:
             break
         prev_len = len(seeds)
-        interp = np.interp(x, seeds, padded[seeds])
-        diff = padded - interp
-        idx = np.argmax(diff)
+        interp   = np.interp(x, seeds, padded[seeds])
+        diff     = padded - interp
+        idx      = np.argmax(diff)
         if padded[idx] <= interp[idx]:
             break
-        seeds = np.sort(np.append(seeds, idx))
+        seeds    = np.sort(np.append(seeds, idx))
     absinterp = interp
 
-    # 7) Compute derivatives on absinterp
-    fp = np.diff(absinterp)
+    # 6) Second derivatives for ASR boundary detection
+    fp    = np.diff(absinterp)
     fp_sm = np.convolve(fp, np.ones(dilation[0]), mode='same')
-    fpp = np.diff(fp_sm)
-    absfpp = np.convolve(np.abs(fpp), np.ones(dilation[1]), mode='same')
+    fpp   = np.diff(fp_sm)
     fpp_sm = np.convolve(fpp, np.ones(dilation[1]), mode='same')
 
-    # 8) Locate chunk-level A, B, C, D
-    # A_c, D_c already have chunk indices
-    # Find attack end B_c
-    tmp = fpp_sm[A_c : D_c + 1].copy(); tmp[tmp >= 0] = 0
-    peaks = np.where(-tmp > (np.max(-tmp) / 20))[0]
-    pk0 = peaks[0] if len(peaks) else 0
-    B_c = A_c + pk0
-    # Find sustain end C_c
-    tmp2 = fpp_sm[A_c : D_c + 1].copy(); tmp2[tmp2 >= 0] = 0
-    peaks2 = np.where(-tmp2 > 0)[0]
-    C_c = A_c + (peaks2[-1] if len(peaks2) else D_c - A_c)
+    # 7) Find chunk‐indices B_c and C_c within [A_c, D_c]
+    segment = fpp_sm[A_c : D_c+1]
+    neg     = (-segment).clip(min=0)
+    peaks   = np.where(neg > (neg.max() / 20))[0]
+    B_c     = A_c + (peaks[0] if len(peaks) else 0)
 
-    # 9) Classify AS vs ASR and Static vs Dynamic
-    types = [None, None]
-    if C_c <= B_c:
-        types[0] = 'AS'
-    else:
-        types[0] = 'ASR'
-    # dynamic test
-    sustain = absinterp[B_c : C_c + 1]
-    if sustain.size:
-        change = (sustain[-1] - sustain[0])
-        types[1] = 'Dynamic' if change < 0 else 'Static'
-    else:
-        types[1] = 'Static'
+    peaks2  = np.where(neg > 0)[0]
+    C_c     = A_c + (peaks2[-1] if len(peaks2) else (D_c - A_c))
 
-    # 10) Map chunk indices back to sample indices
+    # 8) Classify AS vs ASR and Static vs Dynamic
+    types = [
+        'AS'  if C_c <= B_c else 'ASR',
+        'Dynamic' if (absinterp[C_c] - absinterp[B_c]) < 0 else 'Static'
+    ]
+
+    # 9) Map chunk indices back to sample indices
     A = max((A_c - pad_chunks) * chunk_size, 0)
     B = max((B_c - pad_chunks) * chunk_size, 0)
     C = max((C_c - pad_chunks) * chunk_size, 0)
     D = min((D_c - pad_chunks) * chunk_size, len(data) - 1)
     indices = np.array([A, B, C, D])
 
-        # 11) Upsample envelope to sample rate with linear interpolation
-    env_chunks = absinterp[pad_chunks : M - pad_chunks]
-    # Map chunk indices to sample positions
-    chunk_positions = np.linspace(0, len(data) - 1, num=env_chunks.size)
-    # Linearly interpolate envelope for each sample
-    env_curve = np.interp(np.arange(len(data)), chunk_positions, env_chunks)
+    # 10) Upsample envelope back to per‑sample resolution
+    env_chunks     = absinterp[pad_chunks : M - pad_chunks]
+    chunk_positions = np.linspace(0, len(data)-1, num=env_chunks.size)
+    env_curve      = np.interp(np.arange(len(data)), chunk_positions, env_chunks)
 
-    return [indices, types, env_curve]
+    return indices, types, env_curve
 
-def retrive_asr(envelope):
-    pass
 
-def save_single_asr(instrument, sul, note, waveform, sampling_rate):
-    split_note = re.match(r'^([A-G])(\d+)$', note, re.IGNORECASE)
+def save_single_asr(db, instrument, sul, note, waveform, sampling_rate):
+    split_note = re.match(r'^([A-Za-z]+)(\d+)$', note)
     note_letter, octave = split_note.groups()
 
     freq = utils.note_to_freq(note_letter, octave)
 
     idx, types, envelope = compute_envelope(waveform, sampling_rate, (freq / np.sqrt(2), freq * np.sqrt(2)))
-    print(idx, types)
 
-    # attack, sustain, release = retrive_asr(envelope)
+    key = (instrument.lower(), note.upper())
+    if key not in db:
+        db[key] = {}
 
-    plt.figure()
-    plt.plot(envelope)
-    plt.show()
+    db[key][sul] = {
+        "waveform": waveform,
+        "sampling_rate": sampling_rate,
+        "envelope": envelope,
+        "attack": envelope[idx[0]:idx[1]],
+        "sustain": envelope[idx[1]:idx[2]],
+        "release": envelope[idx[2]:idx[3]]
+    }
+
+
+def save_all_asr(reference_db):
+    root = "instrument_samples"
+    for instrument_folder in os.listdir(root):
+        for sul_folder in os.listdir(os.path.join(root, instrument_folder)):
+            for note_file in os.listdir(os.path.join(root, instrument_folder, sul_folder)):
+                sul = sul_folder[-1]
+                instrument = instrument_folder
+                note = note_file.split(".")[-2]
+                waveform, sampling_rate = sf.read(os.path.join(root, instrument_folder, sul_folder, note_file))
+                save_single_asr(reference_db, instrument, sul, note, waveform, sampling_rate)
+
+def plot_from_db(db, instrument, sul, note):
+    info = db[(instrument, note)][sul]
+    print(info)
     plt.figure()
     plt.subplot(4, 1, 1)
-    plt.plot((envelope[idx[0]:idx[1]]))
+    plt.plot(info["envelope"])
     plt.subplot(4, 1, 2)
-    plt.plot((envelope[idx[1]:idx[2]]))
-    plt.subplot(3, 1, 3)
-    plt.plot((envelope[idx[2]:idx[3]]))
+    plt.plot(info["attack"])
+    plt.subplot(4, 1, 3)
+    plt.plot(info["sustain"])
+    plt.subplot(4, 1, 4)
+    plt.plot(info["release"])
     plt.show()
 
-    # key = (instrument.lower(), note.upper())
-    # if key not in refrence_db:
-    #     refrence_db[key] = {}
+def create_db():
+    reference_db = {}
+    save_all_asr(reference_db)
 
-    # refrence_db[key][sul] = {
-    #     "waveform": waveform,
-    #     "sampling_rate": sampling_rate,
-    #     "envelope": envelope,
-    #     "attack": attack,
-    #     "sustain": sustain,
-    #     "release": release
-    # }
-
-
-refrence_db = {}
-
-waveform, sampling_rate = sf.read("./instrument_samples/Viola/Viola_A/Viola.sulA.A4.wav")
-
-save_single_asr("Viola", "A", "A4", waveform, sampling_rate)
+    with open("reference_db.pkl", "wb") as f:
+        pickle.dump(reference_db, f, protocol=pickle.HIGHEST_PROTOCOL)
