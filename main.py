@@ -75,6 +75,6 @@ def cli():
     else:
         cli()
 
-# seperate_audio("./input", "SwampThang.wav")
-cli()
+separate_audio("./input", "SwampThang.wav")
+# cli()
 

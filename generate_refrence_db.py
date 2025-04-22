@@ -341,3 +341,5 @@ def create_db():
 
     with open("reference_db.pkl", "wb") as f:
         pickle.dump(reference_db, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+create_db()
