@@ -190,6 +190,9 @@ def plot_monophonic_scatter(mono_labels: np.ndarray,
 ref_db = load_reference_db('reference_db.pkl')
 instrument = 'clarinet'  # change to 'violin', etc.
 mono_labels, note_list, times = build_monophonic_labels(
-    ref_db, instrument, 'audio.pkl', thr_ratio=0.7, min_duration_sec=0.07)
+    ref_db, instrument, 'audio.pkl', thr_ratio=0.05, min_duration_sec=0.01)
+
+with open("note_matrix.pkl", 'wb') as f:
+    pickle.dump((mono_labels, note_list, times), f)
 plot_monophonic_scatter(mono_labels, note_list, times, instrument)
 
