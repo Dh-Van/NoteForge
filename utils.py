@@ -27,3 +27,18 @@ def generate_note_list():
     start = all_notes.index("A1")
     end   = all_notes.index("G6") + 1
     return all_notes[start:end]
+
+STRINGS = [
+    "Violin",
+    "Viola",
+    "Cello",
+    "Bass"
+]
+
+WOODWINDS = [
+    "Flute",
+]
+
+CLARINET = [
+    "BbClarinet",
+]

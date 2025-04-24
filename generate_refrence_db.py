@@ -13,24 +13,29 @@ import pickle
 
 def get_all_instruments():
     data = [
-        ("Violin_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulG.stereo.zip"),
-        ("Violin_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulD.stereo.zip"),
-        ("Violin_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulA.stereo.zip"),
-        ("Violin_E", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulE.stereo.zip"),
-        ("Viola_C", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulC.stereo.zip"),
-        ("Viola_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulG.stereo.zip"),
-        ("Viola_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulD.stereo.zip"),
-        ("Viola_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulA.stereo.zip"),
-        ("Cello_C", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulC.stereo.zip"),        
-        ("Cello_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulG.stereo.zip"),        
-        ("Cello_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulD.stereo.zip"),        
-        ("Cello_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulA.stereo.zip"),        
-        ("Bass_C", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulC.stereo.zip"),
-        ("Bass_E", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulE.stereo.zip"),
-        ("Bass_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulA.stereo.zip"),
-        ("Bass_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulD.stereo.zip"),
-        ("Bass_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulG.stereo.zip"),
+        # ("Violin_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulG.stereo.zip"),
+        # ("Violin_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulD.stereo.zip"),
+        # ("Violin_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulA.stereo.zip"),
+        # ("Violin_E", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Violin/Violin.arco.ff.sulE.stereo.zip"),
+        # ("Viola_C", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulC.stereo.zip"),
+        # ("Viola_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulG.stereo.zip"),
+        # ("Viola_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulD.stereo.zip"),
+        # ("Viola_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Viola/Viola.arco.ff.sulA.stereo.zip"),
+        # ("Cello_C", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulC.stereo.zip"),        
+        # ("Cello_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulG.stereo.zip"),        
+        # ("Cello_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulD.stereo.zip"),        
+        # ("Cello_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Cello/Cello.arco.ff.sulA.stereo.zip"),        
+        # ("Bass_C", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulC.stereo.zip"),
+        # ("Bass_E", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulE.stereo.zip"),
+        # ("Bass_A", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulA.stereo.zip"),
+        # ("Bass_D", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulD.stereo.zip"),
+        # ("Bass_G", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Strings/Double%20Bass/Bass.arco.ff.sulG.stereo.zip"),
+        ("Flute_V", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Woodwinds/Flute/Flute.vib.ff.stereo.zip"),
+        ("Flute_N", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Woodwinds/Flute/Flute.nonvib.ff.stereo.zip"),
+        ("Clarinet_b", "https://theremin.music.uiowa.edu/sound%20files/MIS%20Pitches%20-%202014/Woodwinds/Bb%20Clarinet/BbClarinet.ff.stereo.zip")
     ]
+
+    # data = data[
 
     for instrument, url in data:
         get_single_instrument_sample(instrument, url)
@@ -51,7 +56,12 @@ def get_single_instrument_sample(instrument, url):
             aiff_data = BytesIO(all_samples.read(name))
             audio = AudioSegment.from_file(aiff_data, format="aiff")
             name_arr = name.split(".")
-            fname = f'{name_arr[0]}.{name_arr[3]}.{name_arr[4]}'
+            if(any(i in name_arr for i in utils.STRINGS)):
+                fname = f'{name_arr[0]}.{name_arr[3]}.{name_arr[4]}'
+            if(any(i in name_arr[0] for i in utils.WOODWINDS)):
+                fname = f'{name_arr[0]}.{name_arr[1]}.{name_arr[3]}'
+            if(any(i in name_arr for i in utils.CLARINET)):
+                fname = f'{name_arr[0]}.{name_arr[1]}.{name_arr[2]}'
             audio.export(f'instrument_samples/{instrument[:-2]}/{instrument}/{fname}.wav', format="wav")
 
 # Envelope extraction parameters
@@ -73,126 +83,6 @@ def hl_envelopes_idx(s, dmin=1, dmax=1, split=False):
     lmax = lmax[[i + np.argmax(s[lmax[i:i + dmax]])
                  for i in range(0, len(lmax), dmax)]]
     return lmin, lmax
-
-
-# def compute_envelope(data, samplerate, freq_or_cutoff,
-#                      n_chunks=500, pad_chunks=1, max_iter=200):
-#     """
-#     Compute amplitude envelope and ASR boundaries efficiently by working
-#     at chunk resolution before upsampling to samples.
-
-#     Parameters:
-#         data           : 1D numpy array of audio samples
-#         samplerate     : sample rate in Hz
-#         freq_or_cutoff : float (freq in Hz), or [semitone], or (low,high) tuple
-#         n_chunks       : number of envelope chunks (default 200)
-#         pad_chunks     : padding size in chunks (default 10)
-#         max_iter       : max iterations for envelope fitting (default 200)
-
-#     Returns:
-#         [
-#           indices: np.array([A, B, C, D]) in sample indices,
-#           types  : ["AS"/"ASR", "Static"/"Dynamic"],
-#           env_curve: 1D numpy array of envelope at sample rate
-#         ]
-#     """
-#     # 1) Determine cutoff bandwidth
-#     if isinstance(freq_or_cutoff, (int, float)):
-#         low = freq_or_cutoff / np.sqrt(2)
-#         high = freq_or_cutoff * np.sqrt(2)
-#     elif isinstance(freq_or_cutoff, (list, tuple)) and len(freq_or_cutoff) == 1:
-#         base = freq_or_cutoff[0]
-#         low = 2 ** ((base - 1) / 12) * 27.5
-#         high = 2 ** ((base + 1) / 12) * 27.5
-#     else:
-#         low, high = freq_or_cutoff
-
-#     # 2) Bandpass filter and rectify
-#     sos = sg.butter(5, (low, high), fs=samplerate,
-#                     btype='bandpass', output='sos')
-#     filtered = sg.sosfilt(sos, data)
-#     rect = np.abs(filtered)
-
-#     # 3) Downsample to chunks via max per chunk
-#     chunk_size = int(np.ceil(len(rect) / n_chunks))
-#     rect_chunks = np.array([
-#         rect[i * chunk_size : (i + 1) * chunk_size].max()
-#         for i in range(n_chunks)
-#     ])
-
-#     # 4) Pad chunk array for envelope seeding
-#     padded = np.pad(rect_chunks, pad_chunks, constant_values=0.0)
-#     M = len(padded)
-#     x = np.arange(M)
-
-#     # 5) Seed envelope points at local extrema + endpoints
-#     _, seeds = hl_envelopes_idx(padded, dmin=1, dmax=1)
-#     # threshold endpoints
-#     A_c, D_c = np.where(padded > 0.01 * padded.max())[0][[0, -1]]
-#     seeds = np.sort(np.unique(np.concatenate([seeds, [A_c, D_c]])))
-
-#     # 6) Iterative upper-envelope fit on chunk-level data
-#     prev_len = -1
-#     for _ in range(max_iter):
-#         if len(seeds) == prev_len:
-#             break
-#         prev_len = len(seeds)
-#         interp = np.interp(x, seeds, padded[seeds])
-#         diff = padded - interp
-#         idx = np.argmax(diff)
-#         if padded[idx] <= interp[idx]:
-#             break
-#         seeds = np.sort(np.append(seeds, idx))
-#     absinterp = interp
-
-#     # 7) Compute derivatives on absinterp
-#     fp = np.diff(absinterp)
-#     fp_sm = np.convolve(fp, np.ones(dilation[0]), mode='same')
-#     fpp = np.diff(fp_sm)
-#     absfpp = np.convolve(np.abs(fpp), np.ones(dilation[1]), mode='same')
-#     fpp_sm = np.convolve(fpp, np.ones(dilation[1]), mode='same')
-
-#     # 8) Locate chunk-level A, B, C, D
-#     # A_c, D_c already have chunk indices
-#     # Find attack end B_c
-#     tmp = fpp_sm[A_c : D_c + 1].copy(); tmp[tmp >= 0] = 0
-#     peaks = np.where(-tmp > (np.max(-tmp) / 20))[0]
-#     pk0 = peaks[0] if len(peaks) else 0
-#     B_c = A_c + pk0
-#     # Find sustain end C_c
-#     tmp2 = fpp_sm[A_c : D_c + 1].copy(); tmp2[tmp2 >= 0] = 0
-#     peaks2 = np.where(-tmp2 > 0)[0]
-#     C_c = A_c + (peaks2[-1] if len(peaks2) else D_c - A_c)
-
-#     # 9) Classify AS vs ASR and Static vs Dynamic
-#     types = [None, None]
-#     if C_c <= B_c:
-#         types[0] = 'AS'
-#     else:
-#         types[0] = 'ASR'
-#     # dynamic test
-#     sustain = absinterp[B_c : C_c + 1]
-#     if sustain.size:
-#         change = (sustain[-1] - sustain[0])
-#         types[1] = 'Dynamic' if change < 0 else 'Static'
-#     else:
-#         types[1] = 'Static'
-
-#     # 10) Map chunk indices back to sample indices
-#     A = max((A_c - pad_chunks) * chunk_size, 0)
-#     B = max((B_c - pad_chunks) * chunk_size, 0)
-#     C = max((C_c - pad_chunks) * chunk_size, 0)
-#     D = min((D_c - pad_chunks) * chunk_size, len(data) - 1)
-#     indices = np.array([A, B, C, D])
-
-#         # 11) Upsample envelope to sample rate with linear interpolation
-#     env_chunks = absinterp[pad_chunks : M - pad_chunks]
-#     # Map chunk indices to sample positions
-#     chunk_positions = np.linspace(0, len(data) - 1, num=env_chunks.size)
-#     # Linearly interpolate envelope for each sample
-#     env_curve = np.interp(np.arange(len(data)), chunk_positions, env_chunks)
-
-#     return [indices, types, env_curve]
 
 def compute_envelope(data, samplerate, cutoff,
                      n_chunks=500, pad_chunks=1, max_iter=200):
@@ -343,3 +233,4 @@ def create_db():
         pickle.dump(reference_db, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 create_db()
+# get_all_instruments()
