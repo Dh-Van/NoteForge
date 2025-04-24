@@ -1,16 +1,16 @@
+# test.py
+
 import pickle
 import numpy as np
 import soundfile as sf
-import utils
-import scipy.signal as sg
 from scipy.signal import butter, filtfilt
-import matplotlib.pyplot as plt
+import scipy.signal as sg
+from utils import note_to_freq
 
-# --- Envelope extraction functions ---
+# --- Envelope‐extraction parameters & functions ---
 DILATION = (3, 5)
 
 def hl_envelopes_idx(s, dmin=1, dmax=1, split=False):
-    """Return local minima and maxima indices for envelope seeding."""
     lmin = (np.diff(np.sign(np.diff(s))) >= 0).nonzero()[0] + 1
     lmax = (np.diff(np.sign(np.diff(s))) <= 0).nonzero()[0] + 1
     if split:
@@ -22,177 +22,200 @@ def hl_envelopes_idx(s, dmin=1, dmax=1, split=False):
     return lmin, lmax
 
 
-def compute_envelope(data, samplerate, cutoff, n_chunks=50, pad_chunks=1, max_iter=200):
-    """Compute amplitude envelope curve for a segment."""
+def compute_envelope(data, samplerate, cutoff,
+                     n_chunks=50, pad_chunks=1, max_iter=200):
     low, high = cutoff
-    sos = sg.butter(5, (low, high), fs=samplerate, btype='bandpass', output='sos')
+    sos      = sg.butter(5, (low, high), fs=samplerate, btype='bandpass', output='sos')
     filtered = sg.sosfilt(sos, data)
-    rect = np.abs(filtered)
-    chunk_size = int(np.ceil(len(rect) / n_chunks))
-    rect_chunks = [rect[i*chunk_size : min((i+1)*chunk_size, len(rect))].max()
-                   for i in range(int(np.ceil(len(rect)/chunk_size)))]
-    rect_chunks = np.array(rect_chunks)
+    rect     = np.abs(filtered)
+
+    chunk_size  = int(np.ceil(len(rect) / n_chunks))
+    rect_chunks = np.array([
+        rect[i*chunk_size : min((i+1)*chunk_size, len(rect))].max()
+        for i in range(int(np.ceil(len(rect)/chunk_size)))
+    ])
+
     padded = np.pad(rect_chunks, pad_chunks, constant_values=0.0)
-    M, x = len(padded), np.arange(len(padded))
+    M = len(padded)
+    x = np.arange(M)
+
     _, extrema = hl_envelopes_idx(padded)
     idxs = np.where(padded > 0.01 * padded.max())[0]
     A_c, D_c = (idxs[0], idxs[-1]) if idxs.size else (0, M-1)
     seeds = np.sort(np.unique(np.concatenate([extrema, [A_c, D_c]])))
+
     prev_len = -1
-    while len(seeds) != prev_len and max_iter > 0:
+    iters = 0
+    while len(seeds) != prev_len and iters < max_iter:
         prev_len = len(seeds)
         interp = np.interp(x, seeds, padded[seeds])
-        diff = padded - interp
-        idx = np.argmax(diff)
+        diff   = padded - interp
+        idx    = np.argmax(diff)
         if padded[idx] <= interp[idx]:
             break
         seeds = np.sort(np.append(seeds, idx))
-        max_iter -= 1
-    absenv = interp
-    env_chunks = absenv[pad_chunks:-pad_chunks] if pad_chunks else absenv
-    positions = np.linspace(0, len(data)-1, num=env_chunks.size)
-    env_curve = np.interp(np.arange(len(data)), positions, env_chunks)
-    return env_curve
+        iters += 1
+    absinterp = interp
 
-# --- Data loaders ---
+    fp    = np.diff(absinterp)
+    fp_sm = np.convolve(fp, np.ones(DILATION[0]), mode='same')
+    fpp   = np.diff(fp_sm)
+    fpp_sm= np.convolve(fpp, np.ones(DILATION[1]), mode='same')
 
-def load_reference_db(path: str) -> dict:
-    """Load ASR envelope database."""
+    segment = fpp_sm[A_c : D_c+1]
+    neg     = (-segment).clip(min=0)
+    peaks   = np.where(neg > (neg.max() / 20))[0]
+    B_c     = A_c + (peaks[0] if peaks.size else 0)
+    peaks2  = np.where(neg > 0)[0]
+    C_c     = A_c + (peaks2[-1] if peaks2.size else (D_c - A_c))
+
+    types = [
+        'AS' if C_c <= B_c else 'ASR',
+        'Dynamic' if (absinterp[C_c] - absinterp[B_c]) < 0 else 'Static'
+    ]
+
+    A = max((A_c - pad_chunks) * chunk_size, 0)
+    B = max((B_c - pad_chunks) * chunk_size, 0)
+    C = max((C_c - pad_chunks) * chunk_size, 0)
+    D = min((D_c - pad_chunks) * chunk_size, len(data)-1)
+    indices = np.array([A, B, C, D])
+
+    env_chunks = absinterp[pad_chunks : M - pad_chunks]
+    positions  = np.linspace(0, len(data)-1, num=env_chunks.size)
+    env_curve  = np.interp(np.arange(len(data)), positions, env_chunks)
+
+    return indices, types, env_curve
+
+# --- Loaders & Helpers ---
+
+def load_reference_db(path='reference_db.pkl'):
     with open(path, 'rb') as f:
         return pickle.load(f)
 
 
-def load_audio_data(path: str = 'audio.pkl') -> tuple:
-    """Load note_list, magnitude matrix, and frame times."""
+def load_audio_data(path='audio.pkl'):
     with open(path, 'rb') as f:
-        note_list, mag_matrix, times = pickle.load(f)
-    return np.asarray(note_list), np.asarray(mag_matrix), np.asarray(times)
+        notes, mag_T, times = pickle.load(f)
+    return list(notes), np.asarray(mag_T).T, np.asarray(times)
 
-# --- Segment utilities ---
 
-def find_segments(mask: np.ndarray) -> list:
-    """Find start/end indices of True segments in a boolean mask."""
-    edges = np.diff(mask.astype(int))
+def load_audio_file(path):
+    audio, fs = sf.read(path)
+    if audio.ndim > 1:
+        audio = audio[:,0]
+    return audio, fs
+
+
+def find_segments(mask):
+    edges  = np.diff(mask.astype(int))
     starts = np.where(edges == 1)[0] + 1
-    ends = np.where(edges == -1)[0] + 1
-    if mask[0]:
-        starts = np.insert(starts, 0, 0)
-    if mask[-1]:
-        ends = np.append(ends, len(mask))
+    ends   = np.where(edges == -1)[0] + 1
+    if mask[0]: starts = np.insert(starts, 0, 0)
+    if mask[-1]: ends = np.append(ends, len(mask))
     return list(zip(starts, ends))
 
-# --- Monophonic labeling for a single instrument ---
+# --- Scoring & Synthesis (attack & release matching) ---
 
-def score_events(mag_matrix: np.ndarray,
-                 reference_db: dict,
-                 note_list: list,
-                 thr_ratio: float = 0.05) -> list:
-    """Detect and score note segments against each instrument's envelopes."""
+def score_events(mag_matrix, reference_db, note_list,
+                 audio, fs, times,
+                 thr_ratio=0.02, corr_thresh=0.0):
     events = []
     for i, note in enumerate(note_list):
-        mag = mag_matrix[i]
+        mag = mag_matrix[:,i]
         if mag.max() == 0:
             continue
-        threshold = thr_ratio * mag.max()
-        for s, e in find_segments(mag >= threshold):
-            seg_len = e - s
-            if seg_len < 1:
-                continue
-            seg = mag[s:e]
-            for (inst, ref_note), samples in reference_db.items():
-                if ref_note != note:
-                    continue
-                for data in samples.values():
-                    attack = data['attack']
-                    release = data.get('release', np.array([]))
-                    L = min(len(attack), seg_len)
-                    x1 = seg[:L] - seg[:L].mean()
-                    y1 = attack[:L] - attack[:L].mean()
-                    norm1 = np.linalg.norm(x1) * np.linalg.norm(y1)
-                    corr1 = np.dot(x1, y1) / norm1 if norm1 > 0 else 0.0
-                    if release.size > 0:
-                        Lr = min(len(release), seg_len)
-                        x2 = seg[-Lr:] - seg[-Lr:].mean()
-                        y2 = release[-Lr:] - release[-Lr:].mean()
-                        norm2 = np.linalg.norm(x2) * np.linalg.norm(y2)
-                        corr2 = np.dot(x2, y2) / norm2 if norm2 > 0 else corr1
-                        score = 0.5 * (corr1 + corr2)
-                    else:
-                        score = corr1
-                    events.append((note, s, e, inst, score))
+        thr = max(thr_ratio * mag.max(), 1e-6)
+        for s_f, e_f in find_segments(mag >= thr):
+            i0 = int(times[s_f] * fs)
+            i1 = int(min(len(audio), np.ceil(times[e_f] * fs)))
+            segment = audio[i0:i1]
+
+            # compute its envelope and indices
+            idxs, types, env_curve = compute_envelope(segment, fs,
+                (note_to_freq(note[:-1], note[-1]) / np.sqrt(2),
+                 note_to_freq(note[:-1], note[-1]) * np.sqrt(2)))
+            A, B, C, D = idxs
+            seg_attack  = env_curve[A:B]
+            seg_release = env_curve[C:D]
+
+            best_inst, best_score = None, -1.0
+            for (inst, ref_note), suls in reference_db.items():
+                if ref_note != note: continue
+                for info in suls.values():
+                    ref_attack  = info['attack']
+                    ref_release = info['release']
+                    # correlate attack
+                    L_a = min(len(seg_attack), len(ref_attack))
+                    if L_a < 3: continue
+                    ca = np.corrcoef(seg_attack[:L_a], ref_attack[:L_a])[0,1]
+                    # correlate release
+                    L_r = min(len(seg_release), len(ref_release))
+                    if L_r < 3: continue
+                    cr = np.corrcoef(seg_release[:L_r], ref_release[:L_r])[0,1]
+                    score = (ca + cr) / 2
+                    if score > best_score:
+                        best_inst, best_score = inst, score
+
+            if best_inst and best_score >= corr_thresh:
+                events.append((note, s_f, e_f, best_inst))
     return events
 
 
-def pick_best(events: list) -> list:
-    """Choose highest-scoring instrument for each note-segment."""
-    best = {}
-    for note, s, e, inst, score in events:
-        key = (note, s, e)
-        if key not in best or score > best[key][1]:
-            best[key] = (inst, score)
-    return [(n, s, e, inst_s[0]) for (n, s, e), inst_s in best.items()]
+def synthesize_instrument(audio_file, reference_db, instrument,
+                          audio_data_path='audio.pkl',
+                          thr_ratio=0.1, corr_thresh=0.05,
+                          safety_semitones=4):
+    notes, mag_matrix, times = load_audio_data(audio_data_path)
+    audio, fs = load_audio_file(audio_file)
+    events = score_events(mag_matrix, reference_db, notes,
+                          audio, fs, times,
+                          thr_ratio, corr_thresh)
+    print(f"[synth] {len(events)} events detected for '{instrument}'")
 
-
-def build_monophonic_labels(reference_db: dict,
-                            instrument: str,
-                            audio_data_path: str = 'audio.pkl',
-                            thr_ratio: float = 0.05,
-                            min_duration_sec: float = 0.05) -> tuple:
-    """
-    Return (mono_labels, note_list, times) for one instrument,
-    discarding segments shorter than min_duration_sec.
-    """
-    note_list, mag_matrix, times = load_audio_data(audio_data_path)
-    events = score_events(mag_matrix, reference_db, note_list, thr_ratio)
-    best = pick_best(events)
-    N_frames = mag_matrix.shape[1]
-    mono = np.full(N_frames, '', dtype=object)
-    for note, s, e, inst in best:
+    separated = np.zeros_like(audio)
+    for note, s_f, e_f, inst in events:
         if inst.lower() != instrument.lower():
             continue
-        # check duration
-        t0 = times[s]
-        t1 = times[min(e-1, len(times)-1)]
-        if (t1 - t0) < min_duration_sec:
-            continue
-        mono[s:e] = note
-    return mono, note_list, times
+        i0 = int(times[s_f] * fs)
+        i1 = int(min(len(audio), np.ceil(times[e_f] * fs)))
+        segment = audio[i0:i1]
 
-# --- Visualization ---
+        tone, octv = note[:-1], note[-1]
+        f0 = note_to_freq(tone, octv)
+        low  = f0 * 2**(-safety_semitones/12)
+        high = f0 * 2**( safety_semitones/12)
+        b, a = butter(4, [low/(fs/2), high/(fs/2)], btype='band')
+        filtered = filtfilt(b, a, segment)
 
-def plot_monophonic_scatter(mono_labels: np.ndarray,
-                            note_list: np.ndarray,
-                            times: np.ndarray,
-                            instrument: str,
-                            max_time: float = 20) -> None:
-    """Scatter plot of monophonic note events for a single instrument."""
-    note_to_idx = {note: i for i, note in enumerate(note_list)}
-    xs, ys = [], []
-    for t, note in enumerate(mono_labels):
-        time = times[t]
-        if note and (max_time is None or time <= max_time):
-            xs.append(time)
-            ys.append(note_to_idx[note])
-    plt.figure(figsize=(10, 6))
-    plt.scatter(xs, ys, s=10)
-    plt.yticks(np.arange(len(note_list)), note_list)
-    plt.xlabel('Time (s)')
-    plt.ylabel('Note')
-    title = f'Monophonic {instrument.capitalize()} Events Over Time'
-    if max_time is not None:
-        title += f' (first {max_time:.2f}s)'
-    plt.title(title)
-    plt.grid(True, axis='x', linestyle='--', alpha=0.4)
-    plt.tight_layout()
-    plt.show()
+        _, types, env_curve = compute_envelope(filtered, fs, (low, high))
+        # match envelope length
+        if len(env_curve) != len(filtered):
+            env_curve = np.interp(
+                np.arange(len(filtered)),
+                np.linspace(0, len(filtered)-1, num=len(env_curve)),
+                env_curve
+            )
+        separated[i0:i1] += filtered * env_curve
 
-# --- Main Execution ---
-ref_db = load_reference_db('reference_db.pkl')
-instrument = 'clarinet'  # change to 'violin', etc.
-mono_labels, note_list, times = build_monophonic_labels(
-    ref_db, instrument, 'audio.pkl', thr_ratio=0.05, min_duration_sec=0.01)
+    peak = np.max(np.abs(separated))
+    if peak > 0:
+        separated /= peak
+    else:
+        print(f"[synth] Warning: output silent for '{instrument}'")
 
-with open("note_matrix.pkl", 'wb') as f:
-    pickle.dump((mono_labels, note_list, times), f)
-plot_monophonic_scatter(mono_labels, note_list, times, instrument)
+    return separated, fs
 
+
+def save_wave(path, waveform, fs):
+    sf.write(path, waveform, fs)
+
+
+if __name__ == "__main__":
+    ref_db = load_reference_db('reference_db.pkl')
+    synth, fs = synthesize_instrument(
+        audio_file='output/SugarPlum/SugarPlum_mono.wav',
+        reference_db=ref_db,
+        instrument='clarinet'
+    )
+    save_wave('clarinet_separated.wav', synth, fs)
+    print("Done! 🎶")
