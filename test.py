@@ -1,221 +1,555 @@
-# test.py
+# test_fixed_all_notes.py
+# Modified version that shows all notes on the axis
 
+import os
 import pickle
 import numpy as np
-import soundfile as sf
-from scipy.signal import butter, filtfilt
-import scipy.signal as sg
-from utils import note_to_freq
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+from scipy.ndimage import gaussian_filter
+from utils import note_to_midi
 
-# --- Envelope‐extraction parameters & functions ---
-DILATION = (3, 5)
+# ─── Classification Parameters ─────────────────────────────
+SILENCE_THRESHOLD = 0.01      # Ignore magnitudes below this value
+EVENT_MIN_DURATION = 20        # Minimum event length in frames
 
-def hl_envelopes_idx(s, dmin=1, dmax=1, split=False):
-    lmin = (np.diff(np.sign(np.diff(s))) >= 0).nonzero()[0] + 1
-    lmax = (np.diff(np.sign(np.diff(s))) <= 0).nonzero()[0] + 1
-    if split:
-        mid = np.mean(s)
-        lmin = lmin[s[lmin] < mid]
-        lmax = lmax[s[lmax] > mid]
-    lmin = lmin[[i + np.argmin(s[lmin[i:i + dmin]]) for i in range(0, len(lmin), dmin)]]
-    lmax = lmax[[i + np.argmax(s[lmax[i:i + dmax]]) for i in range(0, len(lmax), dmax)]]
-    return lmin, lmax
-
-
-def compute_envelope(data, samplerate, cutoff,
-                     n_chunks=50, pad_chunks=1, max_iter=200):
-    low, high = cutoff
-    sos      = sg.butter(5, (low, high), fs=samplerate, btype='bandpass', output='sos')
-    filtered = sg.sosfilt(sos, data)
-    rect     = np.abs(filtered)
-
-    chunk_size  = int(np.ceil(len(rect) / n_chunks))
-    rect_chunks = np.array([
-        rect[i*chunk_size : min((i+1)*chunk_size, len(rect))].max()
-        for i in range(int(np.ceil(len(rect)/chunk_size)))
-    ])
-
-    padded = np.pad(rect_chunks, pad_chunks, constant_values=0.0)
-    M = len(padded)
-    x = np.arange(M)
-
-    _, extrema = hl_envelopes_idx(padded)
-    idxs = np.where(padded > 0.01 * padded.max())[0]
-    A_c, D_c = (idxs[0], idxs[-1]) if idxs.size else (0, M-1)
-    seeds = np.sort(np.unique(np.concatenate([extrema, [A_c, D_c]])))
-
-    prev_len = -1
-    iters = 0
-    while len(seeds) != prev_len and iters < max_iter:
-        prev_len = len(seeds)
-        interp = np.interp(x, seeds, padded[seeds])
-        diff   = padded - interp
-        idx    = np.argmax(diff)
-        if padded[idx] <= interp[idx]:
-            break
-        seeds = np.sort(np.append(seeds, idx))
-        iters += 1
-    absinterp = interp
-
-    fp    = np.diff(absinterp)
-    fp_sm = np.convolve(fp, np.ones(DILATION[0]), mode='same')
-    fpp   = np.diff(fp_sm)
-    fpp_sm= np.convolve(fpp, np.ones(DILATION[1]), mode='same')
-
-    segment = fpp_sm[A_c : D_c+1]
-    neg     = (-segment).clip(min=0)
-    peaks   = np.where(neg > (neg.max() / 20))[0]
-    B_c     = A_c + (peaks[0] if peaks.size else 0)
-    peaks2  = np.where(neg > 0)[0]
-    C_c     = A_c + (peaks2[-1] if peaks2.size else (D_c - A_c))
-
-    types = [
-        'AS' if C_c <= B_c else 'ASR',
-        'Dynamic' if (absinterp[C_c] - absinterp[B_c]) < 0 else 'Static'
-    ]
-
-    A = max((A_c - pad_chunks) * chunk_size, 0)
-    B = max((B_c - pad_chunks) * chunk_size, 0)
-    C = max((C_c - pad_chunks) * chunk_size, 0)
-    D = min((D_c - pad_chunks) * chunk_size, len(data)-1)
-    indices = np.array([A, B, C, D])
-
-    env_chunks = absinterp[pad_chunks : M - pad_chunks]
-    positions  = np.linspace(0, len(data)-1, num=env_chunks.size)
-    env_curve  = np.interp(np.arange(len(data)), positions, env_chunks)
-
-    return indices, types, env_curve
-
-# --- Loaders & Helpers ---
+# Instrument playable ranges (in MIDI note numbers)
+# Flute range: B3 (59) to D7 (98)
+FLUTE_RANGE = (59, 98)  
+# Clarinet range: D3 (50) to G6 (91)
+CLARINET_RANGE = (50, 91)
+# ──────────────────────────────────────────────────────────
 
 def load_reference_db(path='reference_db.pkl'):
+    """Load the reference database containing instrument envelope templates"""
+    try:
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+    except:
+        print("[test] Could not load reference database, will use forced classification")
+        return {}
+
+def load_audio_data(path='audio.pkl'):
+    """Load the processed audio data"""
     with open(path, 'rb') as f:
         return pickle.load(f)
 
-
-def load_audio_data(path='audio.pkl'):
-    with open(path, 'rb') as f:
-        notes, mag_T, times = pickle.load(f)
-    return list(notes), np.asarray(mag_T).T, np.asarray(times)
-
-
-def load_audio_file(path):
-    audio, fs = sf.read(path)
-    if audio.ndim > 1:
-        audio = audio[:,0]
-    return audio, fs
-
-
-def find_segments(mask):
-    edges  = np.diff(mask.astype(int))
-    starts = np.where(edges == 1)[0] + 1
-    ends   = np.where(edges == -1)[0] + 1
-    if mask[0]: starts = np.insert(starts, 0, 0)
-    if mask[-1]: ends = np.append(ends, len(mask))
-    return list(zip(starts, ends))
-
-# --- Scoring & Synthesis (attack & release matching) ---
-
-def score_events(mag_matrix, reference_db, note_list,
-                 audio, fs, times,
-                 thr_ratio=0.02, corr_thresh=0.0):
+def segment_events(mag, threshold=SILENCE_THRESHOLD):
+    """
+    Find contiguous segments in magnitude data above threshold.
+    
+    Args:
+        mag: Magnitude data for a single note
+        threshold: Silence threshold
+        
+    Returns:
+        List of (start, end) frame indices
+    """
     events = []
-    for i, note in enumerate(note_list):
-        mag = mag_matrix[:,i]
-        if mag.max() == 0:
-            continue
-        thr = max(thr_ratio * mag.max(), 1e-6)
-        for s_f, e_f in find_segments(mag >= thr):
-            i0 = int(times[s_f] * fs)
-            i1 = int(min(len(audio), np.ceil(times[e_f] * fs)))
-            segment = audio[i0:i1]
-
-            # compute its envelope and indices
-            idxs, types, env_curve = compute_envelope(segment, fs,
-                (note_to_freq(note[:-1], note[-1]) / np.sqrt(2),
-                 note_to_freq(note[:-1], note[-1]) * np.sqrt(2)))
-            A, B, C, D = idxs
-            seg_attack  = env_curve[A:B]
-            seg_release = env_curve[C:D]
-
-            best_inst, best_score = None, -1.0
-            for (inst, ref_note), suls in reference_db.items():
-                if ref_note != note: continue
-                for info in suls.values():
-                    ref_attack  = info['attack']
-                    ref_release = info['release']
-                    # correlate attack
-                    L_a = min(len(seg_attack), len(ref_attack))
-                    if L_a < 3: continue
-                    ca = np.corrcoef(seg_attack[:L_a], ref_attack[:L_a])[0,1]
-                    # correlate release
-                    L_r = min(len(seg_release), len(ref_release))
-                    if L_r < 3: continue
-                    cr = np.corrcoef(seg_release[:L_r], ref_release[:L_r])[0,1]
-                    score = (ca + cr) / 2
-                    if score > best_score:
-                        best_inst, best_score = inst, score
-
-            if best_inst and best_score >= corr_thresh:
-                events.append((note, s_f, e_f, best_inst))
+    in_event = False
+    start = 0
+    
+    for i, val in enumerate(mag):
+        if not in_event and val > threshold:
+            # Start of new event
+            in_event = True
+            start = i
+        elif in_event and val <= threshold:
+            # End of current event
+            if i - start >= EVENT_MIN_DURATION:
+                events.append((start, i))
+            in_event = False
+    
+    # Handle case where audio ends during an event
+    if in_event and len(mag) - start >= EVENT_MIN_DURATION:
+        events.append((start, len(mag)))
+    
     return events
 
+def note_in_range(note, range_tuple):
+    """Check if a note is within a given MIDI range"""
+    midi_num = note_to_midi(note)
+    return range_tuple[0] <= midi_num <= range_tuple[1]
 
-def synthesize_instrument(audio_file, reference_db, instrument,
-                          audio_data_path='audio.pkl',
-                          thr_ratio=0.1, corr_thresh=0.05,
-                          safety_semitones=4):
-    notes, mag_matrix, times = load_audio_data(audio_data_path)
-    audio, fs = load_audio_file(audio_file)
-    events = score_events(mag_matrix, reference_db, notes,
-                          audio, fs, times,
-                          thr_ratio, corr_thresh)
-    print(f"[synth] {len(events)} events detected for '{instrument}'")
+def is_in_flute_range(note):
+    """Check if a note is in flute range"""
+    return note_in_range(note, FLUTE_RANGE)
 
-    separated = np.zeros_like(audio)
-    for note, s_f, e_f, inst in events:
-        if inst.lower() != instrument.lower():
+def is_in_clarinet_range(note):
+    """Check if a note is in clarinet range"""
+    return note_in_range(note, CLARINET_RANGE)
+
+def classify_events_with_ranges(data, ref_db=None):
+    """
+    Classify notes based on playable ranges and enforce one note per time frame per instrument.
+    
+    Args:
+        data: Audio data dictionary from audio.pkl
+        ref_db: Not used in this version
+        
+    Returns:
+        Classification map
+    """
+    notes = data['notes']
+    mag_matrix = data['mag_matrix']
+    times = data['times']
+    
+    n_frames, n_notes = mag_matrix.shape
+    
+    # Initialize classification map (0=silence, 1=flute, 2=clarinet)
+    class_map = np.zeros((n_frames, n_notes), dtype=int)
+    
+    # Convert notes to MIDI numbers for range checking
+    midi_numbers = [note_to_midi(note) for note in notes]
+    
+    # Track statistics for debugging
+    stats = {
+        "total_events": 0, 
+        "classified_events": 0, 
+        "instruments": {"flute": 0, "clarinet": 0},
+        "out_of_range": 0
+    }
+    
+    # First, find all events
+    all_events = []
+    for j, note in enumerate(notes):
+        # Skip if no significant energy in this note
+        if np.max(mag_matrix[:, j]) < SILENCE_THRESHOLD:
             continue
-        i0 = int(times[s_f] * fs)
-        i1 = int(min(len(audio), np.ceil(times[e_f] * fs)))
-        segment = audio[i0:i1]
+        
+        # Get magnitude data for this note
+        mag = mag_matrix[:, j]
+        
+        # Find segments with significant energy
+        events = segment_events(mag)
+        
+        # Skip if no events found
+        if not events:
+            continue
+        
+        # Store events with note information and magnitude
+        for start, end in events:
+            avg_mag = np.mean(mag[start:end])
+            all_events.append({
+                'note_idx': j,
+                'note': note,
+                'midi': midi_numbers[j],
+                'start': start,
+                'end': end,
+                'magnitude': avg_mag,
+                'in_flute_range': is_in_flute_range(note),
+                'in_clarinet_range': is_in_clarinet_range(note)
+            })
+    
+    # Count total events
+    stats["total_events"] = len(all_events)
+    print(f"Found {len(all_events)} total events")
+    
+    # Sort events by start time for processing
+    all_events.sort(key=lambda e: e['start'])
+    
+    # Process events one time frame at a time
+    for t in range(n_frames):
+        # Get events active at this time frame
+        active_events = [e for e in all_events if e['start'] <= t < e['end']]
+        
+        if not active_events:
+            continue
+            
+        # Sort by magnitude (loudest first)
+        active_events.sort(key=lambda e: e['magnitude'], reverse=True)
+        
+        # Variables to track if we've assigned a note to each instrument in this frame
+        flute_assigned = False
+        clarinet_assigned = False
+        
+        # Try to assign notes to instruments
+        for event in active_events:
+            note_idx = event['note_idx']
+            
+            # Skip if this note is already classified in this frame
+            if class_map[t, note_idx] != 0:
+                continue
+                
+            # Try to assign to flute first if in range and flute not yet assigned
+            if not flute_assigned and event['in_flute_range']:
+                class_map[t, note_idx] = 1  # Flute
+                flute_assigned = True
+                if t == event['start']:  # Count only once per event
+                    stats["instruments"]["flute"] += 1
+                    stats["classified_events"] += 1
+                    
+            # Otherwise try clarinet if in range and clarinet not yet assigned
+            elif not clarinet_assigned and event['in_clarinet_range']:
+                class_map[t, note_idx] = 2  # Clarinet
+                clarinet_assigned = True
+                if t == event['start']:  # Count only once per event
+                    stats["instruments"]["clarinet"] += 1
+                    stats["classified_events"] += 1
+            
+            # If event is out of both ranges, count it but don't classify
+            elif t == event['start'] and not event['in_flute_range'] and not event['in_clarinet_range']:
+                stats["out_of_range"] += 1
+    
+    # Print classification statistics
+    print(f"[test] Classification complete:")
+    print(f"  Total events: {stats['total_events']}")
+    print(f"  Classified events: {stats['classified_events']} ({100*stats['classified_events']/max(1, stats['total_events']):.1f}%)")
+    print(f"  Out of range events: {stats['out_of_range']} ({100*stats['out_of_range']/max(1, stats['total_events']):.1f}%)")
+    for inst, count in stats["instruments"].items():
+        print(f"  {inst.capitalize()}: {count} events ({100*count/max(1, stats['classified_events']):.1f}%)")
+    
+    return class_map
 
-        tone, octv = note[:-1], note[-1]
-        f0 = note_to_freq(tone, octv)
-        low  = f0 * 2**(-safety_semitones/12)
-        high = f0 * 2**( safety_semitones/12)
-        b, a = butter(4, [low/(fs/2), high/(fs/2)], btype='band')
-        filtered = filtfilt(b, a, segment)
-
-        _, types, env_curve = compute_envelope(filtered, fs, (low, high))
-        # match envelope length
-        if len(env_curve) != len(filtered):
-            env_curve = np.interp(
-                np.arange(len(filtered)),
-                np.linspace(0, len(filtered)-1, num=len(env_curve)),
-                env_curve
-            )
-        separated[i0:i1] += filtered * env_curve
-
-    peak = np.max(np.abs(separated))
-    if peak > 0:
-        separated /= peak
-    else:
-        print(f"[synth] Warning: output silent for '{instrument}'")
-
-    return separated, fs
-
-
-def save_wave(path, waveform, fs):
-    sf.write(path, waveform, fs)
-
-
-if __name__ == "__main__":
-    ref_db = load_reference_db('reference_db.pkl')
-    synth, fs = synthesize_instrument(
-        audio_file='output/SugarPlum/SugarPlum_mono.wav',
-        reference_db=ref_db,
-        instrument='clarinet'
+def plot_classification(notes, times, class_map, output_path=None):
+    """
+    Plot the classification results.
+    
+    Args:
+        notes: List of note names
+        times: Array of time points
+        class_map: Classification map (0=silence, 1=flute, 2=clarinet)
+        output_path: Path to save the plot (if None, display instead)
+        
+    Returns:
+        Path to saved plot if output_path is provided
+    """
+    n_frames, n_notes = class_map.shape
+    
+    # Apply Gaussian smoothing for better visualization
+    smoothed_map = gaussian_filter(class_map.astype(float), sigma=(1.0, 0))
+    
+    # Create color map
+    cmap = mcolors.ListedColormap(['white', 'tab:blue', 'tab:green'])
+    bounds = [-0.5, 0.5, 1.5, 2.5]
+    norm = mcolors.BoundaryNorm(bounds, cmap.N)
+    
+    # Create figure with adjusted size for better visibility
+    plt.figure(figsize=(14, 10))
+    
+    # Plot the classification map
+    plt.imshow(
+        smoothed_map.T,  # Transpose for better orientation
+        aspect='auto',
+        origin='lower',
+        extent=[times[0], times[-1], 0, n_notes],
+        cmap=cmap,
+        norm=norm,
+        interpolation='nearest'
     )
-    save_wave('clarinet_separated.wav', synth, fs)
-    print("Done! 🎶")
+    
+    # Add range indicators for instruments
+    midi_values = [note_to_midi(note) for note in notes]
+    
+    # Find indices corresponding to range boundaries
+    flute_low_idx = next((i for i, m in enumerate(midi_values) if m >= FLUTE_RANGE[0]), None)
+    flute_high_idx = next((i for i, m in enumerate(midi_values) if m > FLUTE_RANGE[1]), len(midi_values))
+    clarinet_low_idx = next((i for i, m in enumerate(midi_values) if m >= CLARINET_RANGE[0]), None)
+    clarinet_high_idx = next((i for i, m in enumerate(midi_values) if m > CLARINET_RANGE[1]), len(midi_values))
+    
+    # Add range indicators
+    if flute_low_idx is not None:
+        plt.axhline(y=flute_low_idx, color='tab:blue', linestyle='--', alpha=0.5)
+        plt.axhline(y=flute_high_idx, color='tab:blue', linestyle='--', alpha=0.5)
+    if clarinet_low_idx is not None:
+        plt.axhline(y=clarinet_low_idx, color='tab:green', linestyle='--', alpha=0.5)
+        plt.axhline(y=clarinet_high_idx, color='tab:green', linestyle='--', alpha=0.5)
+    
+    # Add labels and title
+    plt.xlabel('Time (s)')
+    plt.ylabel('Note')
+    plt.title('Instrument Classification (with Playable Ranges)')
+    
+    # Add y-tick labels (note names) - SHOW ALL NOTES
+    plt.yticks(
+        np.arange(n_notes) + 0.5,
+        notes
+    )
+    
+    # Add legend
+    legend_patches = [
+        mpatches.Patch(color='white', label='Silence'),
+        mpatches.Patch(color='tab:blue', label='Flute'),
+        mpatches.Patch(color='tab:green', label='Clarinet'),
+        plt.Line2D([0], [0], color='tab:blue', linestyle='--', alpha=0.5, label='Flute Range'),
+        plt.Line2D([0], [0], color='tab:green', linestyle='--', alpha=0.5, label='Clarinet Range')
+    ]
+    plt.legend(handles=legend_patches, loc='upper right')
+    
+    # Save or display
+    if output_path:
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+        return output_path
+    else:
+        plt.tight_layout()
+        plt.show()
+        return None
+
+def plot_magnitude(notes, times, mag_matrix, output_path=None):
+    """
+    Plot the magnitude data.
+    
+    Args:
+        notes: List of note names
+        times: Array of time points
+        mag_matrix: Magnitude matrix
+        output_path: Path to save the plot (if None, display instead)
+        
+    Returns:
+        Path to saved plot if output_path is provided
+    """
+    n_frames, n_notes = mag_matrix.shape
+    
+    # Apply log scaling and normalization for better visualization
+    mag_log = np.log1p(mag_matrix)
+    if np.max(mag_log) > 0:
+        mag_normalized = mag_log / np.max(mag_log)
+    else:
+        mag_normalized = mag_log
+    
+    # Apply Gaussian smoothing
+    mag_smoothed = gaussian_filter(mag_normalized, sigma=(1.0, 0))
+    
+    # Create figure with adjusted size for better visibility
+    plt.figure(figsize=(14, 10))
+    
+    # Plot the magnitude data
+    plt.imshow(
+        mag_smoothed.T,  # Transpose for better orientation
+        aspect='auto',
+        origin='lower',
+        extent=[times[0], times[-1], 0, n_notes],
+        cmap='viridis',
+        interpolation='nearest'
+    )
+    
+    # Add instrument range indicators
+    midi_values = [note_to_midi(note) for note in notes]
+    
+    # Find indices corresponding to range boundaries
+    flute_low_idx = next((i for i, m in enumerate(midi_values) if m >= FLUTE_RANGE[0]), None)
+    flute_high_idx = next((i for i, m in enumerate(midi_values) if m > FLUTE_RANGE[1]), len(midi_values))
+    clarinet_low_idx = next((i for i, m in enumerate(midi_values) if m >= CLARINET_RANGE[0]), None)
+    clarinet_high_idx = next((i for i, m in enumerate(midi_values) if m > CLARINET_RANGE[1]), len(midi_values))
+    
+    # Add range indicators
+    if flute_low_idx is not None:
+        plt.axhline(y=flute_low_idx, color='tab:blue', linestyle='--', alpha=0.5)
+        plt.axhline(y=flute_high_idx, color='tab:blue', linestyle='--', alpha=0.5)
+    if clarinet_low_idx is not None:
+        plt.axhline(y=clarinet_low_idx, color='tab:green', linestyle='--', alpha=0.5)
+        plt.axhline(y=clarinet_high_idx, color='tab:green', linestyle='--', alpha=0.5)
+    
+    # Add labels and title
+    plt.xlabel('Time (s)')
+    plt.ylabel('Note')
+    plt.title('Magnitude Spectrogram (with Instrument Ranges)')
+    
+    # Add y-tick labels (note names) - SHOW ALL NOTES
+    plt.yticks(
+        np.arange(n_notes) + 0.5,
+        notes
+    )
+    
+    # Add legend for instrument ranges
+    legend_elements = [
+        plt.Line2D([0], [0], color='tab:blue', linestyle='--', alpha=0.5, label='Flute Range'),
+        plt.Line2D([0], [0], color='tab:green', linestyle='--', alpha=0.5, label='Clarinet Range')
+    ]
+    plt.legend(handles=legend_elements, loc='upper right')
+    
+    # Add colorbar
+    plt.colorbar(label='Normalized Magnitude (log scale)')
+    
+    # Save or display
+    if output_path:
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+        return output_path
+    else:
+        plt.tight_layout()
+        plt.show()
+        return None
+
+def plot_piano_roll(notes, times, class_map, output_path=None):
+    """
+    Create a piano roll visualization of the classification results.
+    
+    Args:
+        notes: List of note names
+        times: Array of time points
+        class_map: Classification map (0=silence, 1=flute, 2=clarinet)
+        output_path: Path to save the plot (if None, display instead)
+        
+    Returns:
+        Path to saved plot if output_path is provided
+    """
+    n_frames, n_notes = class_map.shape
+    
+    # Create figure with adjusted size for better visibility of all notes
+    plt.figure(figsize=(14, 12))
+    
+    # Create color map for different instruments
+    colors = ['tab:blue', 'tab:green']
+    
+    # Find non-zero (active) notes for each instrument
+    for instrument_id in range(1, 3):  # 1=flute, 2=clarinet
+        for j, note in enumerate(notes):
+            i = 0
+            while i < n_frames:
+                if class_map[i, j] == instrument_id:
+                    # Find end of this note
+                    start_idx = i
+                    end_idx = start_idx
+                    while end_idx < n_frames - 1 and class_map[end_idx + 1, j] == instrument_id:
+                        end_idx += 1
+                    
+                    # Plot this note segment
+                    plt.plot(
+                        [times[start_idx], times[end_idx + 1]], 
+                        [j, j], 
+                        color=colors[instrument_id - 1],
+                        linewidth=5,
+                        solid_capstyle='butt'
+                    )
+                    
+                    # Skip ahead
+                    i = end_idx + 1
+                else:
+                    i += 1
+    
+    # Add instrument range indicators
+    midi_values = [note_to_midi(note) for note in notes]
+    
+    # Find indices corresponding to range boundaries
+    flute_low_idx = next((i for i, m in enumerate(midi_values) if m >= FLUTE_RANGE[0]), None)
+    flute_high_idx = next((i for i, m in enumerate(midi_values) if m > FLUTE_RANGE[1]), len(midi_values))
+    clarinet_low_idx = next((i for i, m in enumerate(midi_values) if m >= CLARINET_RANGE[0]), None)
+    clarinet_high_idx = next((i for i, m in enumerate(midi_values) if m > CLARINET_RANGE[1]), len(midi_values))
+    
+    # Add range indicators
+    if flute_low_idx is not None:
+        plt.axhline(y=flute_low_idx, color='tab:blue', linestyle='--', alpha=0.5)
+        plt.axhline(y=flute_high_idx, color='tab:blue', linestyle='--', alpha=0.5)
+    if clarinet_low_idx is not None:
+        plt.axhline(y=clarinet_low_idx, color='tab:green', linestyle='--', alpha=0.5)
+        plt.axhline(y=clarinet_high_idx, color='tab:green', linestyle='--', alpha=0.5)
+    
+    # Add labels and title
+    plt.xlabel('Time (s)')
+    plt.ylabel('Note')
+    plt.title('Piano Roll View (One Note Per Instrument with Playable Ranges)')
+    
+    # Set y-axis limits
+    plt.ylim(-0.5, n_notes - 0.5)
+    
+    # Add y-tick labels (note names) - SHOW ALL NOTES
+    plt.yticks(
+        np.arange(n_notes),
+        notes
+    )
+    
+    # Add legend
+    legend_elements = [
+        plt.Line2D([0], [0], color='tab:blue', lw=4, label='Flute'),
+        plt.Line2D([0], [0], color='tab:green', lw=4, label='Clarinet'),
+        plt.Line2D([0], [0], color='tab:blue', linestyle='--', alpha=0.5, label='Flute Range'),
+        plt.Line2D([0], [0], color='tab:green', linestyle='--', alpha=0.5, label='Clarinet Range')
+    ]
+    plt.legend(handles=legend_elements, loc='upper right')
+    
+    # Add grid
+    plt.grid(True, which='both', linestyle='--', alpha=0.3)
+    
+    # Save or display
+    if output_path:
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300)
+        plt.close()
+        return output_path
+    else:
+        plt.tight_layout()
+        plt.show()
+        return None
+
+def main(audio_pkl_path='audio.pkl', ref_db_path='reference_db.pkl'):
+    """
+    Main function to run the instrument classification process.
+    
+    Args:
+        audio_pkl_path: Path to the processed audio data
+        ref_db_path: Path to the reference database
+        
+    Returns:
+        Dictionary of output paths
+    """
+    # Create output directory
+    output_dir = os.path.dirname(audio_pkl_path)
+    if not output_dir:
+        output_dir = 'output'
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Load data
+    print(f"[test] Loading audio data from {audio_pkl_path}")
+    try:
+        data = load_audio_data(audio_pkl_path)
+    except Exception as e:
+        print(f"[test] Error loading audio data: {e}")
+        return None
+    
+    notes = data['notes']
+    mag_matrix = data['mag_matrix']
+    times = data['times']
+    
+    print(f"[test] Loading reference database from {ref_db_path}")
+    ref_db = load_reference_db(ref_db_path)
+    
+    # Classify the audio data using range-based classification
+    print("[test] Classifying instruments...")
+    class_map = classify_events_with_ranges(data, ref_db)
+    
+    # Create output paths
+    outputs = {}
+    
+    # Plot classification map
+    print("[test] Plotting classification map...")
+    class_map_path = os.path.join(output_dir, 'classification_map.png')
+    outputs['classification_map'] = plot_classification(notes, times, class_map, class_map_path)
+    
+    # Plot magnitude data
+    print("[test] Plotting magnitude data...")
+    mag_path = os.path.join(output_dir, 'magnitude.png')
+    outputs['magnitude'] = plot_magnitude(notes, times, mag_matrix, mag_path)
+    
+    # Plot piano roll
+    print("[test] Plotting piano roll...")
+    piano_roll_path = os.path.join(output_dir, 'piano_roll.png')
+    outputs['piano_roll'] = plot_piano_roll(notes, times, class_map, piano_roll_path)
+    
+    print("[test] Analysis complete. Results saved to:")
+    for key, path in outputs.items():
+        print(f"  - {key}: {path}")
+    
+    return outputs
+
+if __name__ == '__main__':
+    import sys
+    
+    # Check if arguments are provided
+    if len(sys.argv) > 1:
+        audio_pkl_path = sys.argv[1]
+    else:
+        audio_pkl_path = 'audio.pkl'
+        
+    if len(sys.argv) > 2:
+        ref_db_path = sys.argv[2]
+    else:
+        ref_db_path = 'reference_db.pkl'
+    
+    main(audio_pkl_path, ref_db_path)
