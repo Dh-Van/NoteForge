@@ -174,47 +174,46 @@ def visualize_reference_db(db, output_dir="reference_visualizations"):
     
     # For each family, create a grid of envelope plots
     for family, items in families.items():
-        # Sort by note
+        # Sort by note name
         items.sort()
         
-        # Create a grid of plots (max 25 per page)
-        for page_idx, page_items in enumerate([items[i:i+25] for i in range(0, len(items), 25)]):
+        # Create pages of up to 25 plots each
+        pages = [items[i:i+25] for i in range(0, len(items), 25)]
+        for page_idx, page_items in enumerate(pages):
             n_items = len(page_items)
             rows = int(np.ceil(np.sqrt(n_items)))
             cols = int(np.ceil(n_items / rows))
             
             fig, axes = plt.subplots(rows, cols, figsize=(15, 10))
+            # force axes into a (rows x cols) array
+            axes = np.array(axes, dtype=object).reshape(rows, cols)
             fig.suptitle(f"{family.capitalize()} Envelopes (Page {page_idx+1})")
             
-            for i, (note, sul_dict) in enumerate(page_items):
-                row, col = i // cols, i % cols
-                ax = axes[row, col] if rows > 1 else axes[col]
-                
+            # Plot each note's envelopes
+            for idx, (note, sul_dict) in enumerate(page_items):
+                r, c = divmod(idx, cols)
+                ax = axes[r, c]
                 for sul, info in sul_dict.items():
-                    ax.plot(info['envelope'], label=f"{sul}")
-                    # Mark the segments
+                    ax.plot(info['envelope'], label=sul)
                     A, S, R = info['segments']
                     ax.axvline(x=A, color='g', linestyle='--', alpha=0.5)
                     ax.axvline(x=S, color='r', linestyle='--', alpha=0.5)
                     ax.axvline(x=R, color='b', linestyle='--', alpha=0.5)
-                
-                ax.set_title(f"{note}")
+                ax.set_title(note)
                 ax.legend(loc='upper right', fontsize='small')
                 ax.set_ylim(0, 1.1)
                 ax.set_xlabel("Sample")
                 ax.set_ylabel("Amplitude")
             
-            # Hide unused subplots
-            for i in range(n_items, rows*cols):
-                row, col = i // cols, i % cols
-                ax = axes[row, col] if rows > 1 else axes[col]
-                ax.axis('off')
+            # Hide any unused subplots
+            for idx in range(n_items, rows * cols):
+                r, c = divmod(idx, cols)
+                axes[r, c].axis('off')
             
             plt.tight_layout(rect=[0, 0, 1, 0.97])
             output_path = os.path.join(output_dir, f"{family}_envelopes_page{page_idx+1}.png")
             plt.savefig(output_path, dpi=150)
             plt.close(fig)
-            
             print(f"[generate_db] Created visualization: {output_path}")
 
 def main():
