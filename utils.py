@@ -16,6 +16,21 @@ _SEMITONE_MAP = {
 }
 _REVERSE_SEMITONE = {v: k for k, v in _SEMITONE_MAP.items()}
 
+STRINGS = [
+    "Violin",
+    "Viola",
+    "Cello",
+    "Bass"
+]
+
+WOODWINDS = [
+    "Flute",
+]
+
+CLARINET = [
+    "BbClarinet",
+]
+
 def split_note_name(full_note: str) -> tuple[str, int]:
     """Split 'Bb4' → ('Bb', 4)."""
     m = re.match(r'^([A-G][b#]?)(\d+)$', full_note)
