@@ -6,6 +6,11 @@
 2. Convert seperate parts into note number and durations
 3. Take note number and durations and covert to sheet music
 
+## How to Run?
+1. Upload an audio file as a .wav file. Online converters are available to turn other audio formats to .wav.
+2. main.py --input path/to/waveform
+3. You should see results
+
 ## Workspace Outline
 
 ### main.py
